@@ -31,6 +31,16 @@ void main() {
       expect(b.finalText, '今日は晴れです。\n次に');
     });
 
+    test('話す人が変わった文の頭に話者名を付ける', () {
+      final b = TranscriptBuffer()
+        ..add('今日 は 行列 です。', isFinal: true, speaker: 0)
+        ..add('まず 定義 から。', isFinal: true, speaker: 0)
+        ..add('質問 です。', isFinal: true, speaker: 1)
+        ..add('どうぞ', isFinal: false, speaker: 0);
+      b.flushInterim();
+      expect(b.finals, ['話者1：今日は行列です。', 'まず定義から。', '話者2：質問です。', '話者1：どうぞ']);
+    });
+
     test('空の確定結果は追加しない', () {
       final b = TranscriptBuffer()..add('', isFinal: true);
       expect(b.finals, isEmpty);
@@ -46,6 +56,7 @@ void main() {
       expect(uri.queryParameters['encoding'], 'linear16');
       expect(uri.queryParameters['sample_rate'], '16000');
       expect(uri.queryParameters['interim_results'], 'true');
+      expect(uri.queryParameters['diarize'], 'true');
     });
 
     test('結果メッセージを読み取る', () {
@@ -55,6 +66,16 @@ void main() {
       final e = DeepgramTranscriber.parseMessage(raw)!;
       expect(e.text, 'こんにちは');
       expect(e.isFinal, isTrue);
+      expect(e.speaker, isNull);
+    });
+
+    test('一番多く話している人を話者にする', () {
+      const raw =
+          '{"type":"Results","is_final":true,"channel":{"alternatives":[{'
+          '"transcript":"はい 質問 です",'
+          '"words":[{"word":"はい","speaker":0},{"word":"質問","speaker":1},'
+          '{"word":"です","speaker":1}]}]}}';
+      expect(DeepgramTranscriber.parseMessage(raw)!.speaker, 1);
     });
 
     test('結果以外や空の途中結果は無視する', () {

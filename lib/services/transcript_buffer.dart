@@ -2,9 +2,13 @@
 ///
 /// ストリーミング音声認識は、同じ区間について途中結果を何度も送り、
 /// 最後に確定結果を1回送る。途中結果は毎回置き換え、確定結果だけを積み上げる。
+///
+/// 話者がわかるときは、話す人が変わった文の頭に「話者1：」のように付ける。
 class TranscriptBuffer {
   final List<String> _finals = [];
   String _interim = '';
+  int? _interimSpeaker;
+  int? _lastSpeaker;
 
   /// 確定した文の一覧（古い順）。
   List<String> get finals => List.unmodifiable(_finals);
@@ -20,21 +24,36 @@ class TranscriptBuffer {
       ? finalText
       : [...?_nonEmpty(finalText), _interim].join('\n');
 
-  void add(String text, {required bool isFinal}) {
+  void add(String text, {required bool isFinal, int? speaker}) {
     final cleaned = normalizeJapanese(text);
     if (isFinal) {
-      if (cleaned.isNotEmpty) _finals.add(cleaned);
+      if (cleaned.isNotEmpty) _addFinal(cleaned, speaker);
       _interim = '';
+      _interimSpeaker = null;
     } else {
       _interim = cleaned;
+      _interimSpeaker = speaker;
     }
   }
 
   /// 録音停止時など、認識中の文も確定扱いにする。
   void flushInterim() {
-    if (_interim.isNotEmpty) _finals.add(_interim);
+    if (_interim.isNotEmpty) _addFinal(_interim, _interimSpeaker);
     _interim = '';
+    _interimSpeaker = null;
   }
+
+  void _addFinal(String text, int? speaker) {
+    if (speaker != null && speaker != _lastSpeaker) {
+      _finals.add('${speakerLabel(speaker)}：$text');
+      _lastSpeaker = speaker;
+    } else {
+      _finals.add(text);
+    }
+  }
+
+  /// Deepgram の話者番号（0から）を、画面に出す名前にする。
+  static String speakerLabel(int speaker) => '話者${speaker + 1}';
 
   static List<String>? _nonEmpty(String s) => s.isEmpty ? null : [s];
 }

@@ -101,7 +101,13 @@ class _RecordingScreenState extends State<RecordingScreen> {
   }
 
   void _onTranscript(TranscriptEvent event) {
-    setState(() => _buffer.add(event.text, isFinal: event.isFinal));
+    setState(
+      () => _buffer.add(
+        event.text,
+        isFinal: event.isFinal,
+        speaker: event.speaker,
+      ),
+    );
     if (event.isFinal && _lecture != null) {
       // 途中で落ちても消えないよう、文が確定するたびに保存する。
       widget.store.save(

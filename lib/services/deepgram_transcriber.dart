@@ -9,7 +9,10 @@ import 'package:web_socket_channel/io.dart';
 class TranscriptEvent {
   final String text;
   final bool isFinal;
-  const TranscriptEvent(this.text, {required this.isFinal});
+
+  /// 話している人の番号（0から）。わからないときは null。
+  final int? speaker;
+  const TranscriptEvent(this.text, {required this.isFinal, this.speaker});
 }
 
 /// Deepgram のストリーミング音声認識に音声を送り、結果を受け取る。
@@ -44,6 +47,8 @@ class DeepgramTranscriber {
       'punctuate': 'true',
       'smart_format': 'true',
       'endpointing': '300',
+      // 声の違いで話している人を見分ける（話者分離）。
+      'diarize': 'true',
     }).replace(scheme: 'wss');
   }
 
@@ -56,7 +61,22 @@ class DeepgramTranscriber {
     final text = (alts.first['transcript'] as String?)?.trim() ?? '';
     final isFinal = json['is_final'] == true;
     if (text.isEmpty && !isFinal) return null;
-    return TranscriptEvent(text, isFinal: isFinal);
+    return TranscriptEvent(
+      text,
+      isFinal: isFinal,
+      speaker: mainSpeaker(alts.first['words'] as List?),
+    );
+  }
+
+  /// 単語ごとの話者番号から、この文で一番多く話している人を選ぶ。
+  static int? mainSpeaker(List? words) {
+    final counts = <int, int>{};
+    for (final w in words ?? const []) {
+      final s = w is Map ? w['speaker'] : null;
+      if (s is int) counts[s] = (counts[s] ?? 0) + 1;
+    }
+    if (counts.isEmpty) return null;
+    return counts.entries.reduce((a, b) => b.value > a.value ? b : a).key;
   }
 
   Future<void> connect() async {
