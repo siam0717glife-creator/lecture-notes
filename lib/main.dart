@@ -142,18 +142,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     _reload();
-    // 録音が終わったら、そのまま講義の画面を開いて要約を始める。
+    // 録音が終わったら、そのまま講義の画面を開く。
     if (saved != null && mounted) await _openLecture(saved);
   }
 
   Future<void> _openLecture(Lecture lecture) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => LectureDetailScreen(
-          store: widget.store,
-          settings: widget.settings,
-          lecture: lecture,
-        ),
+        builder: (_) =>
+            LectureDetailScreen(store: widget.store, lecture: lecture),
       ),
     );
     _reload();

@@ -1,25 +1,19 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../services/claude_summarizer.dart';
+import '../services/lecture_note_prompt.dart';
 import '../services/lecture_store.dart';
-import '../services/settings.dart';
-import 'settings_screen.dart';
 
 /// 保存した講義の要約と文字起こし全文を表示する画面。
 ///
-/// 要約がまだ無ければ、開いたときに自動で作り始める。
+/// 要約は無料の Claude アプリで作ってもらい、返ってきた文章を貼り付けて保存する。
 class LectureDetailScreen extends StatefulWidget {
   final LectureStore store;
-  final AppSettings settings;
   final Lecture lecture;
   const LectureDetailScreen({
     super.key,
     required this.store,
-    required this.settings,
     required this.lecture,
   });
 
@@ -30,20 +24,11 @@ class LectureDetailScreen extends StatefulWidget {
 class _LectureDetailScreenState extends State<LectureDetailScreen> {
   String? _transcript;
   String? _summary;
-  bool _summarizing = false;
-  String? _summaryError;
-  StreamSubscription<String>? _summarySub;
 
   @override
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    _summarySub?.cancel();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -54,60 +39,37 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       _transcript = transcript;
       _summary = summary;
     });
-    if (summary == null &&
-        transcript.trim().isNotEmpty &&
-        widget.settings.anthropicApiKey.isNotEmpty) {
-      _summarize();
-    }
   }
 
-  Future<void> _summarize() async {
-    final transcript = _transcript ?? '';
-    if (transcript.trim().isEmpty || _summarizing) return;
-    if (widget.settings.anthropicApiKey.isEmpty) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => SettingsScreen(settings: widget.settings),
+  /// 要約の指示と文字起こしを、共有メニューから Claude アプリに渡す。
+  Future<void> _shareToClaudeApp() async {
+    final text = LectureNotePrompt.build(
+      title: widget.lecture.title,
+      transcript: _transcript ?? '',
+    );
+    await SharePlus.instance.share(
+      ShareParams(text: text, subject: '${widget.lecture.title} の講義ノート'),
+    );
+  }
+
+  /// Claude アプリでコピーした要約を、この講義の要約として保存する。
+  Future<void> _pasteSummary() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (!mounted) return;
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('コピーされた文章がありません。Claude アプリで要約をコピーしてください。'),
         ),
       );
-      if (widget.settings.anthropicApiKey.isEmpty) return;
+      return;
     }
-    final buffer = StringBuffer();
-    setState(() {
-      _summarizing = true;
-      _summaryError = null;
-      _summary = '';
-    });
-    final summarizer = ClaudeSummarizer(
-      apiKey: widget.settings.anthropicApiKey,
-    );
-    _summarySub = summarizer
-        .summarize(title: widget.lecture.title, transcript: transcript)
-        .listen(
-          (chunk) {
-            buffer.write(chunk);
-            if (mounted) setState(() => _summary = buffer.toString());
-          },
-          onError: (Object e) async {
-            // 途中までの要約は不完全なので保存しない。
-            final saved = await widget.store.readSummary(widget.lecture);
-            if (!mounted) return;
-            setState(() {
-              _summarizing = false;
-              _summaryError = e.toString();
-              _summary = saved;
-            });
-          },
-          onDone: () async {
-            if (_summaryError != null) return;
-            final text = buffer.toString().trim();
-            if (text.isNotEmpty) {
-              await widget.store.saveSummary(widget.lecture, text);
-            }
-            if (mounted) setState(() => _summarizing = false);
-          },
-          cancelOnError: true,
-        );
+    await widget.store.saveSummary(widget.lecture, text);
+    if (!mounted) return;
+    setState(() => _summary = text);
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('要約を保存しました')));
   }
 
   Future<void> _delete() async {
@@ -129,21 +91,9 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       ),
     );
     if (ok == true) {
-      await _summarySub?.cancel();
       await widget.store.delete(widget.lecture);
       if (mounted) Navigator.of(context).pop(true);
     }
-  }
-
-  /// 無料で要約する方法: Claude アプリなどに指示付きの文字起こしを渡す。
-  Future<void> _shareToClaudeApp() async {
-    final text = ClaudeSummarizer.buildSharePrompt(
-      title: widget.lecture.title,
-      transcript: _transcript ?? '',
-    );
-    await SharePlus.instance.share(
-      ShareParams(text: text, subject: '${widget.lecture.title} の講義ノート'),
-    );
   }
 
   void _copy(String text) {
@@ -183,67 +133,56 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   Widget _buildSummary() {
     final theme = Theme.of(context);
     final summary = _summary ?? '';
-    final transcriptEmpty = (_transcript ?? '').trim().isEmpty;
+    if ((_transcript ?? '').trim().isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          '文字起こしが無いので、要約できません。',
+          style: TextStyle(color: theme.colorScheme.outline),
+        ),
+      );
+    }
+    final steps = theme.textTheme.bodyMedium;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        if (transcriptEmpty)
-          Text(
-            '文字起こしが無いので、要約できません。',
-            style: TextStyle(color: theme.colorScheme.outline),
-          )
-        else
+        if (summary.isEmpty) ...[
+          Text('Claude アプリ（無料）で要約を作れます。', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 8),
+          Text('1. 下の「Claudeアプリで要約する」を押し、共有先で Claude を選ぶ', style: steps),
+          Text('2. Claude アプリで送信し、返ってきた要約をコピーする', style: steps),
+          Text('3. このアプリに戻り「コピーした要約を貼り付けて保存」を押す', style: steps),
+          const SizedBox(height: 16),
+        ],
+        FilledButton.icon(
+          onPressed: _shareToClaudeApp,
+          icon: const Icon(Icons.share),
+          label: Text(summary.isEmpty ? 'Claudeアプリで要約する' : 'Claudeアプリで要約し直す'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _pasteSummary,
+          icon: const Icon(Icons.content_paste),
+          label: const Text('コピーした要約を貼り付けて保存'),
+        ),
+        if (summary.isNotEmpty) ...[
+          const SizedBox(height: 16),
           Row(
             children: [
-              if (_summarizing) ...[
-                const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 8),
-                const Expanded(child: Text('Claude が要約を書いています…')),
-              ] else ...[
-                FilledButton.tonalIcon(
-                  onPressed: _summarize,
-                  icon: const Icon(Icons.auto_awesome),
-                  label: Text(summary.isEmpty ? '要約する' : '要約を作り直す'),
-                ),
-                const Spacer(),
-                if (summary.isNotEmpty)
-                  IconButton(
-                    tooltip: '要約をコピー',
-                    icon: const Icon(Icons.copy),
-                    onPressed: () => _copy(summary),
-                  ),
-              ],
+              Text('保存した要約', style: theme.textTheme.titleSmall),
+              const Spacer(),
+              IconButton(
+                tooltip: '要約をコピー',
+                icon: const Icon(Icons.copy),
+                onPressed: () => _copy(summary),
+              ),
             ],
           ),
-        if (!transcriptEmpty && !_summarizing) ...[
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _shareToClaudeApp,
-            icon: const Icon(Icons.share),
-            label: const Text('Claudeアプリで要約する（無料）'),
-          ),
-          Text(
-            '共有先で Claude を選ぶと、要約の指示と文字起こしがそのまま送られます。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.outline,
-            ),
+          SelectableText(
+            summary,
+            style: theme.textTheme.bodyLarge?.copyWith(height: 1.6),
           ),
         ],
-        if (_summaryError != null) ...[
-          const SizedBox(height: 12),
-          Text(
-            _summaryError!,
-            style: TextStyle(color: theme.colorScheme.error),
-          ),
-        ],
-        const SizedBox(height: 16),
-        SelectableText(
-          summary,
-          style: theme.textTheme.bodyLarge?.copyWith(height: 1.6),
-        ),
       ],
     );
   }

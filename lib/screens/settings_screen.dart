@@ -14,24 +14,18 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final _key = TextEditingController(text: widget.settings.deepgramApiKey);
   late final _model = TextEditingController(text: widget.settings.model);
-  late final _claudeKey = TextEditingController(
-    text: widget.settings.anthropicApiKey,
-  );
   bool _hidden = true;
-  bool _claudeHidden = true;
 
   @override
   void dispose() {
     _key.dispose();
     _model.dispose();
-    _claudeKey.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     await widget.settings.setDeepgramApiKey(_key.text);
     await widget.settings.setModel(_model.text);
-    await widget.settings.setAnthropicApiKey(_claudeKey.text);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -66,26 +60,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               labelText: '認識モデル（通常は変更不要）',
               helperText: '日本語がうまく認識されないときは nova-2 を試してください',
               border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 32),
-          const Text(
-            '要約には Claude（Anthropic）を使います。'
-            'console.anthropic.com で登録し、作成した API キーを貼り付けてください。',
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _claudeKey,
-            obscureText: _claudeHidden,
-            decoration: InputDecoration(
-              labelText: 'Claude API キー',
-              border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _claudeHidden ? Icons.visibility : Icons.visibility_off,
-                ),
-                onPressed: () => setState(() => _claudeHidden = !_claudeHidden),
-              ),
             ),
           ),
           const SizedBox(height: 24),
