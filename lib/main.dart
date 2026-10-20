@@ -6,21 +6,43 @@ import 'screens/settings_screen.dart';
 import 'services/lecture_store.dart';
 import 'services/settings.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final settings = await AppSettings.load();
-  final store = await LectureStore.open();
-  runApp(LectureNotesApp(settings: settings, store: store));
+  // 本番版では画面の部品でエラーが起きると灰色の箱になるだけなので、内容を表示する。
+  ErrorWidget.builder = (details) => _ErrorView(details.exceptionAsString());
+  runApp(const LectureNotesApp());
 }
 
-class LectureNotesApp extends StatelessWidget {
+/// 起動時に読み込むもの（設定と保存先）。
+class _AppData {
   final AppSettings settings;
   final LectureStore store;
-  const LectureNotesApp({
-    super.key,
-    required this.settings,
-    required this.store,
-  });
+  _AppData(this.settings, this.store);
+
+  static Future<_AppData> load() async {
+    const limit = Duration(seconds: 10);
+    final settings = await AppSettings.load().timeout(
+      limit,
+      onTimeout: () => throw '設定の読み込みが終わりません',
+    );
+    final store = await LectureStore.open().timeout(
+      limit,
+      onTimeout: () => throw '保存フォルダの準備が終わりません',
+    );
+    return _AppData(settings, store);
+  }
+}
+
+class LectureNotesApp extends StatefulWidget {
+  const LectureNotesApp({super.key});
+
+  @override
+  State<LectureNotesApp> createState() => _LectureNotesAppState();
+}
+
+class _LectureNotesAppState extends State<LectureNotesApp> {
+  // 先に画面を出してから読み込み、失敗したら理由を表示する。
+  late final Future<_AppData> _data = _AppData.load();
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +54,48 @@ class LectureNotesApp extends StatelessWidget {
         brightness: Brightness.dark,
         useMaterial3: true,
       ),
-      home: HomeScreen(settings: settings, store: store),
+      home: FutureBuilder<_AppData>(
+        future: _data,
+        builder: (context, snap) {
+          if (snap.hasError) {
+            return Scaffold(body: _ErrorView('起動できませんでした: ${snap.error}'));
+          }
+          if (!snap.hasData) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return HomeScreen(
+            settings: snap.data!.settings,
+            store: snap.data!.store,
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// エラーの内容を、スクリーンショットで送れるように表示する。
+class _ErrorView extends StatelessWidget {
+  final String message;
+  const _ErrorView(this.message);
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: SingleChildScrollView(
+            child: Text(
+              'エラーが起きました。この画面のスクリーンショットを送ってください。\n\n$message',
+              style: const TextStyle(color: Colors.black, fontSize: 14),
+              textDirection: TextDirection.ltr,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
