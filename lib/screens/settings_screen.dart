@@ -14,18 +14,24 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late final _key = TextEditingController(text: widget.settings.deepgramApiKey);
   late final _model = TextEditingController(text: widget.settings.model);
+  late final _geminiKey = TextEditingController(
+    text: widget.settings.geminiApiKey,
+  );
   bool _hidden = true;
+  bool _geminiHidden = true;
 
   @override
   void dispose() {
     _key.dispose();
     _model.dispose();
+    _geminiKey.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     await widget.settings.setDeepgramApiKey(_key.text);
     await widget.settings.setModel(_model.text);
+    await widget.settings.setGeminiApiKey(_geminiKey.text);
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -60,6 +66,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
               labelText: '認識モデル（通常は変更不要）',
               helperText: '日本語がうまく認識されないときは nova-2 を試してください',
               border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 32),
+          const Text(
+            '要約には Google の Gemini（無料枠）を使います。'
+            'aistudio.google.com で「Get API key」からキーを作り、貼り付けてください。'
+            '無料枠では、送った内容が Google の AI 改善に使われることがあります。',
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _geminiKey,
+            obscureText: _geminiHidden,
+            decoration: InputDecoration(
+              labelText: 'Gemini API キー',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _geminiHidden ? Icons.visibility : Icons.visibility_off,
+                ),
+                onPressed: () => setState(() => _geminiHidden = !_geminiHidden),
+              ),
             ),
           ),
           const SizedBox(height: 24),

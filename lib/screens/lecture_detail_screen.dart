@@ -1,19 +1,27 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../services/gemini_summarizer.dart';
 import '../services/lecture_note_prompt.dart';
 import '../services/lecture_store.dart';
+import '../services/settings.dart';
+import 'settings_screen.dart';
 
 /// 保存した講義の要約と文字起こし全文を表示する画面。
 ///
-/// 要約は無料の Claude アプリで作ってもらい、返ってきた文章を貼り付けて保存する。
+/// 要約がまだ無ければ、開いたときに Gemini（無料枠）で自動で作り始める。
+/// Gemini が使えないときは、Claude アプリに渡して貼り付ける方法も選べる。
 class LectureDetailScreen extends StatefulWidget {
   final LectureStore store;
+  final AppSettings settings;
   final Lecture lecture;
   const LectureDetailScreen({
     super.key,
     required this.store,
+    required this.settings,
     required this.lecture,
   });
 
@@ -24,11 +32,20 @@ class LectureDetailScreen extends StatefulWidget {
 class _LectureDetailScreenState extends State<LectureDetailScreen> {
   String? _transcript;
   String? _summary;
+  bool _summarizing = false;
+  String? _summaryError;
+  StreamSubscription<String>? _summarySub;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _summarySub?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -39,6 +56,57 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       _transcript = transcript;
       _summary = summary;
     });
+    if (summary == null &&
+        transcript.trim().isNotEmpty &&
+        widget.settings.geminiApiKey.isNotEmpty) {
+      _summarize();
+    }
+  }
+
+  /// Gemini で要約を作り、届いた分から画面に出す。終わったら保存する。
+  Future<void> _summarize() async {
+    final transcript = _transcript ?? '';
+    if (transcript.trim().isEmpty || _summarizing) return;
+    if (widget.settings.geminiApiKey.isEmpty) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SettingsScreen(settings: widget.settings),
+        ),
+      );
+      if (!mounted || widget.settings.geminiApiKey.isEmpty) return;
+    }
+    final previous = _summary;
+    final buffer = StringBuffer();
+    setState(() {
+      _summarizing = true;
+      _summaryError = null;
+      _summary = '';
+    });
+    _summarySub = GeminiSummarizer(apiKey: widget.settings.geminiApiKey)
+        .summarize(title: widget.lecture.title, transcript: transcript)
+        .listen(
+          (chunk) {
+            buffer.write(chunk);
+            if (mounted) setState(() => _summary = buffer.toString());
+          },
+          onError: (Object e) {
+            // 途中までの要約は不完全なので保存せず、前の要約に戻す。
+            if (!mounted) return;
+            setState(() {
+              _summarizing = false;
+              _summaryError = e.toString();
+              _summary = previous;
+            });
+          },
+          onDone: () async {
+            final text = buffer.toString().trim();
+            if (text.isNotEmpty) {
+              await widget.store.saveSummary(widget.lecture, text);
+            }
+            if (mounted) setState(() => _summarizing = false);
+          },
+          cancelOnError: true,
+        );
   }
 
   /// 要約の指示と文字起こしを、共有メニューから Claude アプリに渡す。
@@ -91,6 +159,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       ),
     );
     if (ok == true) {
+      await _summarySub?.cancel();
       await widget.store.delete(widget.lecture);
       if (mounted) Navigator.of(context).pop(true);
     }
@@ -142,45 +211,88 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         ),
       );
     }
-    final steps = theme.textTheme.bodyMedium;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        if (summary.isEmpty) ...[
-          Text('Claude アプリ（無料）で要約を作れます。', style: theme.textTheme.titleSmall),
-          const SizedBox(height: 8),
-          Text('1. 下の「Claudeアプリで要約する」を押し、共有先で Claude を選ぶ', style: steps),
-          Text('2. Claude アプリで送信し、返ってきた要約をコピーする', style: steps),
-          Text('3. このアプリに戻り「コピーした要約を貼り付けて保存」を押す', style: steps),
-          const SizedBox(height: 16),
-        ],
-        FilledButton.icon(
-          onPressed: _shareToClaudeApp,
-          icon: const Icon(Icons.share),
-          label: Text(summary.isEmpty ? 'Claudeアプリで要約する' : 'Claudeアプリで要約し直す'),
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton.icon(
-          onPressed: _pasteSummary,
-          icon: const Icon(Icons.content_paste),
-          label: const Text('コピーした要約を貼り付けて保存'),
-        ),
-        if (summary.isNotEmpty) ...[
-          const SizedBox(height: 16),
+        if (_summarizing)
+          const Row(
+            children: [
+              SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(width: 8),
+              Expanded(child: Text('Gemini が要約を書いています…')),
+            ],
+          )
+        else
           Row(
             children: [
-              Text('保存した要約', style: theme.textTheme.titleSmall),
-              const Spacer(),
-              IconButton(
-                tooltip: '要約をコピー',
-                icon: const Icon(Icons.copy),
-                onPressed: () => _copy(summary),
+              FilledButton.icon(
+                onPressed: _summarize,
+                icon: const Icon(Icons.auto_awesome),
+                label: Text(summary.isEmpty ? '自動で要約する（無料）' : '要約を作り直す'),
               ),
+              const Spacer(),
+              if (summary.isNotEmpty)
+                IconButton(
+                  tooltip: '要約をコピー',
+                  icon: const Icon(Icons.copy),
+                  onPressed: () => _copy(summary),
+                ),
             ],
           ),
+        if (_summaryError != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            _summaryError!,
+            style: TextStyle(color: theme.colorScheme.error),
+          ),
+        ],
+        if (summary.isNotEmpty) ...[
+          const SizedBox(height: 16),
           SelectableText(
             summary,
             style: theme.textTheme.bodyLarge?.copyWith(height: 1.6),
+          ),
+        ],
+        if (!_summarizing) ...[
+          const SizedBox(height: 24),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Claude アプリで要約する（予備の方法）'),
+            subtitle: const Text('Gemini の無料回数を使い切ったときなどに'),
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '1.「Claudeアプリに送る」を押し、共有先で Claude を選んで送信\n'
+                  '2. 返ってきた要約をコピー\n'
+                  '3. ここに戻り「コピーした要約を貼り付けて保存」を押す',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _shareToClaudeApp,
+                    icon: const Icon(Icons.share),
+                    label: const Text('Claudeアプリに送る'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _pasteSummary,
+                    icon: const Icon(Icons.content_paste),
+                    label: const Text('コピーした要約を貼り付けて保存'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
           ),
         ],
       ],
