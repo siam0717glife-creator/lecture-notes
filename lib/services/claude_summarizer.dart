@@ -6,11 +6,9 @@ import 'dart:io';
 ///
 /// Dart には公式 SDK が無いので HTTP で直接呼び出し、結果をストリーミングで受け取る。
 class ClaudeSummarizer {
-  static const model = 'claude-opus-5-5';
+  // 講義1回（約3〜4万字）で1円ほどの、安くて速いモデル。
+  static const model = 'claude-haiku-5-5';
   static final defaultEndpoint = Uri.https('api.anthropic.com', '/v1/messages');
-
-  /// 安全確認で断られたときに、Anthropic おすすめの別モデルで自動的にやり直す。
-  static const fallbackBeta = 'server-side-fallback-2026-07-01';
 
   static const systemPrompt = '''
 あなたは大学の講義ノートを作る優秀なアシスタントです。
@@ -40,6 +38,14 @@ class ClaudeSummarizer {
   ClaudeSummarizer({required this.apiKey, Uri? endpoint})
     : endpoint = endpoint ?? defaultEndpoint;
 
+  /// Claude アプリなどに貼り付けて要約してもらうための文章（無料で使う方法）。
+  static String buildSharePrompt({
+    required String title,
+    required String transcript,
+  }) =>
+      '$systemPrompt\n講義名: $title\n\n<transcript>\n$transcript\n</transcript>\n\n'
+      'この講義の講義ノートを作ってください。';
+
   static Map<String, dynamic> buildRequest({
     required String title,
     required String transcript,
@@ -48,7 +54,6 @@ class ClaudeSummarizer {
       'model': model,
       'max_tokens': 16000,
       'stream': true,
-      'fallbacks': 'default',
       'thinking': {'type': 'adaptive'},
       'output_config': {'effort': 'medium'},
       'system': systemPrompt,
@@ -74,8 +79,7 @@ class ClaudeSummarizer {
       request.headers
         ..contentType = ContentType.json
         ..set('x-api-key', apiKey)
-        ..set('anthropic-version', '2023-06-01')
-        ..set('anthropic-beta', fallbackBeta);
+        ..set('anthropic-version', '2023-06-01');
       request.add(
         utf8.encode(
           jsonEncode(buildRequest(title: title, transcript: transcript)),

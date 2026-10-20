@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../services/claude_summarizer.dart';
 import '../services/lecture_store.dart';
@@ -134,6 +135,17 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     }
   }
 
+  /// 無料で要約する方法: Claude アプリなどに指示付きの文字起こしを渡す。
+  Future<void> _shareToClaudeApp() async {
+    final text = ClaudeSummarizer.buildSharePrompt(
+      title: widget.lecture.title,
+      transcript: _transcript ?? '',
+    );
+    await SharePlus.instance.share(
+      ShareParams(text: text, subject: '${widget.lecture.title} の講義ノート'),
+    );
+  }
+
   void _copy(String text) {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context)
@@ -206,6 +218,20 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
               ],
             ],
           ),
+        if (!transcriptEmpty && !_summarizing) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _shareToClaudeApp,
+            icon: const Icon(Icons.share),
+            label: const Text('Claudeアプリで要約する（無料）'),
+          ),
+          Text(
+            '共有先で Claude を選ぶと、要約の指示と文字起こしがそのまま送られます。',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.outline,
+            ),
+          ),
+        ],
         if (_summaryError != null) ...[
           const SizedBox(height: 12),
           Text(

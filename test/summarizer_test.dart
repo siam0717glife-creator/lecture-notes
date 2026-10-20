@@ -14,15 +14,24 @@ Map<String, dynamic> textDelta(String t) => {
 };
 
 void main() {
-  test('リクエストに Opus 5.5・ストリーミング・フォールバックが入る', () {
+  test('リクエストに Haiku 5.5・ストリーミングが入る', () {
     final r = ClaudeSummarizer.buildRequest(title: '線形代数', transcript: '行列の話');
-    expect(r['model'], 'claude-opus-5-5');
+    expect(r['model'], 'claude-haiku-5-5');
     expect(r['stream'], isTrue);
-    expect(r['fallbacks'], 'default');
     expect(r['output_config'], {'effort': 'medium'});
     final content = (r['messages'] as List).single['content'] as String;
     expect(content, contains('線形代数'));
     expect(content, contains('<transcript>\n行列の話\n</transcript>'));
+  });
+
+  test('無料で使うための貼り付け用の文章に指示と本文が入る', () {
+    final t = ClaudeSummarizer.buildSharePrompt(
+      title: '統計',
+      transcript: '分散の話',
+    );
+    expect(t, contains('【要点】'));
+    expect(t, contains('講義名: 統計'));
+    expect(t, contains('分散の話'));
   });
 
   test('SSE の行から JSON を組み立てる', () {
@@ -101,7 +110,6 @@ void main() {
         headers = {
           'x-api-key': req.headers.value('x-api-key') ?? '',
           'anthropic-version': req.headers.value('anthropic-version') ?? '',
-          'anthropic-beta': req.headers.value('anthropic-beta') ?? '',
         };
         body = jsonDecode(await utf8.decoder.bind(req).join());
         req.response.headers.contentType = ContentType(
@@ -140,8 +148,7 @@ void main() {
       expect(text, '【この講義のまとめ】\n行列について学んだ。');
       expect(headers['x-api-key'], 'test-key');
       expect(headers['anthropic-version'], '2023-06-01');
-      expect(headers['anthropic-beta'], 'server-side-fallback-2026-07-01');
-      expect(body['model'], 'claude-opus-5-5');
+      expect(body['model'], 'claude-haiku-5-5');
     });
 
     test('401 のときはキーの確認を促す', () async {
