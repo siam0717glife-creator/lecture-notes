@@ -29,11 +29,21 @@ android {
         versionName = flutter.versionName
     }
 
+    // 試作版のため、署名の鍵をリポジトリに置いて固定している（オーナー了承済み）。
+    // 鍵が毎回変わると上書き更新できず、アンインストールで講義データが消えるため。
+    // ストアで公開する前には、鍵を作り直して GitHub の Secrets に移すこと。
+    signingConfigs {
+        create("release") {
+            storeFile = file("release.jks")
+            storePassword = "lecturenotes"
+            keyAlias = "lecture-notes"
+            keyPassword = "lecturenotes"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             // コードを縮める処理（R8）が shared_preferences などのプラグインの
             // 呼び出し先まで消してしまい、起動時に NoSuchMethodError になったため無効にする。
             isMinifyEnabled = false
