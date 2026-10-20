@@ -12,10 +12,11 @@
 
 ## Android で試す
 
-1. GitHub のこのリポジトリの「Actions」タブを開き、いちばん上の「Android アプリを作る」を選ぶ
-2. 下の「Artifacts」から `lecture-notes-android` をダウンロードし、中の `app-release.apk` をスマホに送る
-3. スマホで apk を開いてインストールする（「提供元不明のアプリ」の許可を求められたら許可）
-4. [Deepgram](https://deepgram.com) に無料登録して API キーを作り、アプリの設定画面に貼り付ける
+1. Android スマホで次のリンクを開くと、アプリのファイル（`lecture-notes.apk`）がダウンロードされます
+   https://github.com/siam0717glife-creator/lecture-notes/releases/latest/download/lecture-notes.apk
+2. ダウンロードが終わったら通知（または「ファイル」アプリのダウンロード）から `lecture-notes.apk` をタップ
+3. 「この提供元のアプリを許可」と出たら、設定で許可して戻り、「インストール」をタップ
+4. [Deepgram](https://deepgram.com) に無料登録して API キーを作り、アプリ右上の設定に貼り付ける
 
 ## iPhone で試す
 
