@@ -37,8 +37,10 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           cp build/app/outputs/flutter-apk/app-release.apk lecture-notes.apk
+          # apk のダウンロードが止まる機種向けに、zip に入れたものも置く
+          zip lecture-notes.zip lecture-notes.apk
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest lecture-notes.apk --title "講義録 最新版" \
+          gh release create latest lecture-notes.apk lecture-notes.zip --title "講義録 最新版" \
             --notes "スマホでこのページを開き、lecture-notes.apk をタップしてインストールしてください。（${GITHUB_SHA::7}）"
         env:
           GH_TOKEN: ${{ github.token }}
