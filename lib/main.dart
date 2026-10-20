@@ -132,12 +132,27 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     final title = await _askTitle();
     if (title == null || !mounted) return;
-    await Navigator.of(context).push(
+    final saved = await Navigator.of(context).push<Lecture>(
       MaterialPageRoute(
         builder: (_) => RecordingScreen(
           store: widget.store,
           settings: widget.settings,
           title: title,
+        ),
+      ),
+    );
+    _reload();
+    // 録音が終わったら、そのまま講義の画面を開いて要約を始める。
+    if (saved != null && mounted) await _openLecture(saved);
+  }
+
+  Future<void> _openLecture(Lecture lecture) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LectureDetailScreen(
+          store: widget.store,
+          settings: widget.settings,
+          lecture: lecture,
         ),
       ),
     );
@@ -219,13 +234,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          LectureDetailScreen(store: widget.store, lecture: l),
-                    ),
-                  );
-                  _reload();
+                  await _openLecture(l);
                 },
               );
             },

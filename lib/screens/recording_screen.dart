@@ -141,15 +141,17 @@ class _RecordingScreenState extends State<RecordingScreen> {
     _buffer.flushInterim();
     await _writeChain;
     await _wav?.close();
+    Lecture? saved;
     if (_lecture != null) {
-      await widget.store.save(
+      saved = await widget.store.save(
         _lecture!,
         transcript: _buffer.finalText,
         duration: _stopwatch.elapsed,
       );
     }
     await WakelockPlus.disable();
-    if (mounted) Navigator.of(context).pop(true);
+    // 保存した講義を返し、そのまま要約画面に進めるようにする。
+    if (mounted) Navigator.of(context).pop(saved);
   }
 
   @override

@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class AppSettings {
   static const _keyDeepgramApiKey = 'deepgram_api_key';
   static const _keyModel = 'deepgram_model';
+  static const _keyAnthropicApiKey = 'anthropic_api_key';
   static const defaultModel = 'nova-3';
 
   final SharedPreferences _prefs;
@@ -24,4 +25,8 @@ class AppSettings {
     _keyModel,
     value.trim().isEmpty ? defaultModel : value.trim(),
   );
+
+  String get anthropicApiKey => _prefs.getString(_keyAnthropicApiKey) ?? '';
+  Future<void> setAnthropicApiKey(String value) =>
+      _prefs.setString(_keyAnthropicApiKey, value.trim());
 }

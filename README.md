@@ -7,8 +7,9 @@
 - 録音ボタンを押すと、話した内容がその場で画面に文字で流れる
 - 講義ごとに文字起こし（`transcript.txt`）と録音（`audio.wav`）をスマホ内に保存
 - 保存した講義の一覧・全文表示・全文コピー・削除
+- 録音を終えると、Claude（claude-opus-5-5）が講義ノート形式の要約を自動で作る（`summary.txt` に保存、作り直しも可）
 
-これから: 中継サーバー（Step 2）、Claude による要約（Step 3）、検索や書き出し（Step 4）。
+これから: 中継サーバー（APIキーをアプリから外す）、検索や書き出し。
 
 ## Android で試す
 
@@ -17,6 +18,7 @@
 2. ダウンロードが終わったら通知（または「ファイル」アプリのダウンロード）から `lecture-notes.apk` をタップ
 3. 「この提供元のアプリを許可」と出たら、設定で許可して戻り、「インストール」をタップ
 4. [Deepgram](https://deepgram.com) に無料登録して API キーを作り、アプリ右上の設定に貼り付ける
+5. 要約を使うときは [Anthropic Console](https://console.anthropic.com) で API キーを作り、同じ設定画面の「Claude API キー」に貼り付ける
 
 ## iPhone で試す
 
@@ -38,5 +40,6 @@ Apple Developer Program（有料）に登録したうえで TestFlight で配布
 | `lib/services/transcript_buffer.dart` | 途中結果と確定結果の管理、日本語の空白除去 |
 | `lib/services/wav_writer.dart` | 録音を WAV ファイルに保存 |
 | `lib/services/lecture_store.dart` | 講義の保存・一覧・削除 |
+| `lib/services/claude_summarizer.dart` | Claude API で要約（HTTP で直接呼び出し、ストリーミング受信） |
 
 試作版のため、API キーはスマホ内に保存しています。他の人に配る前に中継サーバーへ移します。

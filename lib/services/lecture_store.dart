@@ -22,6 +22,7 @@ class Lecture {
   File get transcriptFile => File('${dir.path}/transcript.txt');
   File get audioFile => File('${dir.path}/audio.wav');
   File get metaFile => File('${dir.path}/meta.json');
+  File get summaryFile => File('${dir.path}/summary.txt');
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -108,6 +109,14 @@ class LectureStore {
       await lecture.transcriptFile.exists()
       ? lecture.transcriptFile.readAsString()
       : '';
+
+  Future<String?> readSummary(Lecture lecture) async =>
+      await lecture.summaryFile.exists()
+      ? lecture.summaryFile.readAsString()
+      : null;
+
+  Future<void> saveSummary(Lecture lecture, String summary) =>
+      lecture.summaryFile.writeAsString(summary);
 
   Future<void> delete(Lecture lecture) => lecture.dir.delete(recursive: true);
 }
