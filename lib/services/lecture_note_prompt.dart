@@ -1,6 +1,7 @@
-/// 講義ノート形式の要約を作ってもらうための指示文。
+/// Claude アプリ（無料プラン）に渡して、講義ノート形式の要約を作ってもらうための文章。
 ///
-/// Gemini（無料枠）での自動要約と、Claude アプリに手で渡す方法の両方で使う。
+/// API を使わないのでお金はかからない。共有ボタンでこの文章を Claude アプリに送り、
+/// 返ってきた要約をコピーしてアプリに貼り付けて保存する。
 class LectureNotePrompt {
   static const instructions = '''
 あなたは大学の講義ノートを作る優秀なアシスタントです。
@@ -24,12 +25,7 @@ class LectureNotePrompt {
 ・文字起こしに無い内容を作り足さない。不明な部分は「（聞き取り不明）」と書く。
 ''';
 
-  /// 講義名と文字起こしを入れた依頼文。
-  static String userMessage(String title, String transcript) =>
-      '講義名: $title\n\n<transcript>\n$transcript\n</transcript>\n\n'
-      'この講義の講義ノートを作ってください。';
-
-  /// 指示と依頼文をまとめた、Claude アプリなどに貼り付ける用の文章。
   static String build({required String title, required String transcript}) =>
-      '$instructions\n${userMessage(title, transcript)}';
+      '$instructions\n講義名: $title\n\n<transcript>\n$transcript\n</transcript>\n\n'
+      'この講義の講義ノートを作ってください。';
 }
