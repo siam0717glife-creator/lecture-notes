@@ -34,6 +34,10 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // コードを縮める処理（R8）が shared_preferences などのプラグインの
+            // 呼び出し先まで消してしまい、起動時に NoSuchMethodError になったため無効にする。
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
