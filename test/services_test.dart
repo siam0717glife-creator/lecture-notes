@@ -188,4 +188,30 @@ void main() {
     ]);
     await server.close(force: true);
   });
+
+  test('各文を話し始めた時刻を、文と同じ順に持つ', () {
+    final b = TranscriptBuffer()
+      ..add('はじめ', isFinal: true, start: 0.5)
+      ..add('つぎ', isFinal: false, start: 4.0);
+    b.flushInterim();
+    expect(b.finals, ['はじめ', 'つぎ']);
+    expect(b.starts, [0.5, 4.0]);
+  });
+
+  test('時刻は、つなぎ直す前の分を足して録音全体の位置にする', () {
+    const raw =
+        '{"type":"Results","is_final":true,"start":2.5,'
+        '"channel":{"alternatives":[{"transcript":"はい"}]}}';
+    expect(DeepgramTranscriber.parseMessage(raw)!.start, 2.5);
+    expect(DeepgramTranscriber.parseMessage(raw, offset: 60)!.start, 62.5);
+  });
+
+  test('行ごとの時刻を保存して読み込める', () async {
+    final dir = await Directory.systemTemp.createTemp('starts');
+    final store = LectureStore(dir);
+    final l = await store.create(title: '定例会');
+    await store.save(l, transcript: 'a\nb', lineStarts: [0.0, 3.5]);
+    expect(await store.readLineStarts(l), [0.0, 3.5]);
+    await dir.delete(recursive: true);
+  });
 }

@@ -13,7 +13,15 @@ class TranscriptEvent {
 
   /// 話している人の番号（0から）。わからないときは null。
   final int? speaker;
-  const TranscriptEvent(this.text, {required this.isFinal, this.speaker});
+
+  /// この文を話し始めた、録音開始からの秒数。
+  final double? start;
+  const TranscriptEvent(
+    this.text, {
+    required this.isFinal,
+    this.speaker,
+    this.start,
+  });
 }
 
 /// Deepgram のストリーミング音声認識に音声を送り、結果を受け取る。
@@ -34,6 +42,9 @@ class DeepgramTranscriber {
   final _status = StreamController<bool>.broadcast();
   final _pending = Queue<Uint8List>();
   int _pendingBytes = 0;
+
+  /// 録音開始から受け取った音声の合計（バイト）。時刻の計算に使う。
+  int _audioBytes = 0;
   bool _finishing = false;
   bool _reconnecting = false;
 
@@ -69,7 +80,9 @@ class DeepgramTranscriber {
   }
 
   /// Deepgram の結果メッセージを読み取る。文字が無いものは null。
-  static TranscriptEvent? parseMessage(String raw) {
+  ///
+  /// [offset] は、この接続で最初に送った音声が録音開始から何秒の位置か。
+  static TranscriptEvent? parseMessage(String raw, {double offset = 0}) {
     final Map<String, dynamic> json = jsonDecode(raw);
     if (json['type'] != 'Results') return null;
     final alts = (json['channel']?['alternatives'] as List?) ?? const [];
@@ -81,6 +94,7 @@ class DeepgramTranscriber {
       text,
       isFinal: isFinal,
       speaker: mainSpeaker(alts.first['words'] as List?),
+      start: json['start'] is num ? offset + (json['start'] as num) : null,
     );
   }
 
@@ -116,10 +130,12 @@ class DeepgramTranscriber {
     }
     _channel = channel;
     _closed = Completer<void>();
+    // Deepgram の時刻は接続ごとに0から数えるので、録音全体での位置に直す。
+    final offset = (_audioBytes - _pendingBytes) / (sampleRate * 2);
     channel.stream.listen(
       (message) {
         if (message is! String) return;
-        final event = parseMessage(message);
+        final event = parseMessage(message, offset: offset);
         if (event != null) _events.add(event);
       },
       onError: (_) {
@@ -163,6 +179,7 @@ class DeepgramTranscriber {
   }
 
   void sendAudio(Uint8List pcm) {
+    _audioBytes += pcm.length;
     final channel = _channel;
     if (channel != null) {
       channel.sink.add(pcm);

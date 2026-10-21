@@ -24,6 +24,7 @@ class Lecture {
   File get metaFile => File('${dir.path}/meta.json');
   File get summaryFile => File('${dir.path}/summary.txt');
   File get speakersFile => File('${dir.path}/speakers.json');
+  File get lineStartsFile => File('${dir.path}/lines.json');
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -74,6 +75,7 @@ class LectureStore {
     Lecture lecture, {
     required String transcript,
     Duration? duration,
+    List<double?>? lineStarts,
   }) async {
     final updated = Lecture(
       id: lecture.id,
@@ -83,6 +85,9 @@ class LectureStore {
       dir: lecture.dir,
     );
     await updated.transcriptFile.writeAsString(transcript);
+    if (lineStarts != null) {
+      await updated.lineStartsFile.writeAsString(jsonEncode(lineStarts));
+    }
     await updated.metaFile.writeAsString(jsonEncode(updated.toJson()));
     return updated;
   }
@@ -118,6 +123,17 @@ class LectureStore {
 
   Future<void> saveSummary(Lecture lecture, String summary) =>
       lecture.summaryFile.writeAsString(summary);
+
+  /// 文字起こしの各行を話し始めた時刻（秒）。記録が無い会議は null。
+  Future<List<double?>?> readLineStarts(Lecture lecture) async {
+    if (!await lecture.lineStartsFile.exists()) return null;
+    try {
+      final json = jsonDecode(await lecture.lineStartsFile.readAsString());
+      return [for (final v in json as List) (v as num?)?.toDouble()];
+    } on FormatException {
+      return null;
+    }
+  }
 
   /// 「話者1 → 田中」のような、話者の名前の対応。
   Future<Map<String, String>> readSpeakerNames(Lecture lecture) async {

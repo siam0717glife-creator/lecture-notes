@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../services/lecture_note_prompt.dart';
@@ -26,6 +27,9 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   String? _transcript;
   String? _summary;
   Map<String, String> _names = {};
+  List<double?>? _lineStarts;
+  final _player = AudioPlayer();
+  bool _hasAudio = false;
 
   /// 話者の名前を置き換えた文字起こし。
   String get _namedTranscript => SpeakerNames.apply(_transcript ?? '', _names);
@@ -36,15 +40,34 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     _load();
   }
 
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
     final transcript = await widget.store.readTranscript(widget.lecture);
     final summary = await widget.store.readSummary(widget.lecture);
     final names = await widget.store.readSpeakerNames(widget.lecture);
+    final starts = await widget.store.readLineStarts(widget.lecture);
+    var hasAudio = false;
+    final audio = widget.lecture.audioFile;
+    if (await audio.exists() && await audio.length() > 44) {
+      try {
+        await _player.setFilePath(audio.path);
+        hasAudio = true;
+      } catch (_) {
+        // 再生できない録音なら、再生ボタンを出さない。
+      }
+    }
     if (!mounted) return;
     setState(() {
       _transcript = transcript;
       _summary = summary;
       _names = names;
+      _lineStarts = starts;
+      _hasAudio = hasAudio;
     });
   }
 
@@ -132,6 +155,22 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     if (mounted) setState(() => _names = names);
   }
 
+  /// 文字起こしの行をタップしたとき、その発言の少し前から再生する。
+  Future<void> _playFrom(double seconds) async {
+    final ms = ((seconds - 1) * 1000).clamp(0, double.infinity).toInt();
+    await _player.seek(Duration(milliseconds: ms));
+    _player.play();
+  }
+
+  Future<void> _shareAudio() async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(widget.lecture.audioFile.path, mimeType: 'audio/wav')],
+        subject: '${widget.lecture.title} の録音',
+      ),
+    );
+  }
+
   Future<void> _delete() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -151,6 +190,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
       ),
     );
     if (ok == true) {
+      await _player.stop();
       await widget.store.delete(widget.lecture);
       if (mounted) Navigator.of(context).pop(true);
     }
@@ -170,6 +210,12 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         appBar: AppBar(
           title: Text(widget.lecture.title),
           actions: [
+            if (_hasAudio)
+              IconButton(
+                tooltip: '録音を共有',
+                icon: const Icon(Icons.ios_share),
+                onPressed: _shareAudio,
+              ),
             IconButton(
               tooltip: '削除',
               icon: const Icon(Icons.delete_outline),
@@ -186,6 +232,7 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         body: _transcript == null
             ? const Center(child: CircularProgressIndicator())
             : TabBarView(children: [_buildSummary(), _buildTranscript()]),
+        bottomNavigationBar: _hasAudio ? _PlayerBar(player: _player) : null,
       ),
     );
   }
@@ -248,39 +295,209 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   }
 
   Widget _buildTranscript() {
+    final theme = Theme.of(context);
     final text = _namedTranscript;
     final hasSpeakers = SpeakerNames.find(_transcript ?? '').isNotEmpty;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Row(
+    final lines = text.isEmpty ? <String>[] : text.split('\n');
+    // 時刻の記録が行と合っていれば、行をタップして再生できる。
+    final starts = _lineStarts?.length == lines.length ? _lineStarts : null;
+    final canJump = _hasAudio && starts != null;
+    return StreamBuilder<Duration>(
+      stream: _player.positionStream,
+      builder: (context, snap) {
+        final position = (snap.data ?? Duration.zero).inMilliseconds / 1000;
+        var current = -1;
+        if (canJump && _player.playing) {
+          for (var i = 0; i < lines.length; i++) {
+            final s = starts[i];
+            if (s != null && s <= position + 0.5) current = i;
+          }
+        }
+        return ListView(
+          padding: const EdgeInsets.all(16),
           children: [
-            Expanded(
-              child: Text(
-                text.isEmpty ? '文字起こしはありません。' : '${text.length}文字',
-                style: TextStyle(color: Theme.of(context).colorScheme.outline),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    text.isEmpty ? '文字起こしはありません。' : '${text.length}文字',
+                    style: TextStyle(color: theme.colorScheme.outline),
+                  ),
+                ),
+                if (text.isNotEmpty)
+                  TextButton.icon(
+                    icon: const Icon(Icons.copy),
+                    label: const Text('全文コピー'),
+                    onPressed: () => _copy(text),
+                  ),
+              ],
             ),
-            if (text.isNotEmpty)
-              TextButton.icon(
-                icon: const Icon(Icons.copy),
-                label: const Text('全文コピー'),
-                onPressed: () => _copy(text),
+            if (hasSpeakers)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  icon: const Icon(Icons.badge_outlined),
+                  label: const Text('話者の名前を変える'),
+                  onPressed: _renameSpeakers,
+                ),
               ),
+            if (canJump)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '文をタップすると、その発言から録音を再生します。',
+                  style: TextStyle(color: theme.colorScheme.outline),
+                ),
+              ),
+            const SizedBox(height: 8),
+            if (!canJump)
+              SelectableText(text, style: theme.textTheme.bodyLarge)
+            else
+              for (var i = 0; i < lines.length; i++)
+                _TranscriptLine(
+                  text: lines[i],
+                  start: starts[i],
+                  playing: i == current,
+                  onTap: starts[i] == null ? null : () => _playFrom(starts[i]!),
+                ),
           ],
-        ),
-        if (hasSpeakers)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              icon: const Icon(Icons.badge_outlined),
-              label: const Text('話者の名前を変える'),
-              onPressed: _renameSpeakers,
-            ),
-          ),
-        const SizedBox(height: 8),
-        SelectableText(text, style: Theme.of(context).textTheme.bodyLarge),
-      ],
+        );
+      },
     );
   }
+}
+
+/// 文字起こしの1行。左に話し始めた時刻を出し、タップでそこから再生する。
+class _TranscriptLine extends StatelessWidget {
+  final String text;
+  final double? start;
+  final bool playing;
+  final VoidCallback? onTap;
+  const _TranscriptLine({
+    required this.text,
+    required this.start,
+    required this.playing,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: playing ? theme.colorScheme.primaryContainer : Colors.transparent,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 56,
+                child: Text(
+                  start == null
+                      ? ''
+                      : formatTime(
+                          Duration(milliseconds: (start! * 1000).round()),
+                        ),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ),
+              Expanded(child: Text(text, style: theme.textTheme.bodyLarge)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 録音の再生・一時停止と、再生位置のつまみ。
+class _PlayerBar extends StatelessWidget {
+  final AudioPlayer player;
+  const _PlayerBar({required this.player});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainerHigh,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: StreamBuilder<Duration>(
+            stream: player.positionStream,
+            builder: (context, snap) {
+              final total = player.duration ?? Duration.zero;
+              var pos = snap.data ?? Duration.zero;
+              if (pos > total) pos = total;
+              return Row(
+                children: [
+                  StreamBuilder<PlayerState>(
+                    stream: player.playerStateStream,
+                    builder: (context, s) {
+                      final playing = s.data?.playing ?? false;
+                      final done =
+                          s.data?.processingState == ProcessingState.completed;
+                      return IconButton(
+                        tooltip: playing && !done ? '一時停止' : '再生',
+                        icon: Icon(
+                          playing && !done ? Icons.pause : Icons.play_arrow,
+                        ),
+                        onPressed: () async {
+                          if (playing && !done) {
+                            await player.pause();
+                          } else {
+                            if (done) await player.seek(Duration.zero);
+                            player.play();
+                          }
+                        },
+                      );
+                    },
+                  ),
+                  Text(
+                    formatTime(pos),
+                    style: const TextStyle(
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  Expanded(
+                    child: Slider(
+                      value: pos.inMilliseconds.toDouble(),
+                      max: total.inMilliseconds.toDouble().clamp(
+                        1,
+                        double.infinity,
+                      ),
+                      onChanged: (v) =>
+                          player.seek(Duration(milliseconds: v.round())),
+                    ),
+                  ),
+                  Text(
+                    formatTime(total),
+                    style: const TextStyle(
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 時間を「12:34」や「1:02:03」の形にする。
+String formatTime(Duration d) {
+  String two(int n) => n.toString().padLeft(2, '0');
+  final m = d.inMinutes % 60;
+  final sec = two(d.inSeconds % 60);
+  return d.inHours > 0 ? '${d.inHours}:${two(m)}:$sec' : '$m:$sec';
 }

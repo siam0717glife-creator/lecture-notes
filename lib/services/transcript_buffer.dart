@@ -6,12 +6,17 @@
 /// 話者がわかるときは、話す人が変わった文の頭に「話者1：」のように付ける。
 class TranscriptBuffer {
   final List<String> _finals = [];
+  final List<double?> _starts = [];
   String _interim = '';
   int? _interimSpeaker;
+  double? _interimStart;
   int? _lastSpeaker;
 
   /// 確定した文の一覧（古い順）。
   List<String> get finals => List.unmodifiable(_finals);
+
+  /// 確定した各文を話し始めた時刻（録音開始からの秒数）。finals と同じ順。
+  List<double?> get starts => List.unmodifiable(_starts);
 
   /// まだ確定していない、認識中の文。
   String get interim => _interim;
@@ -24,26 +29,32 @@ class TranscriptBuffer {
       ? finalText
       : [...?_nonEmpty(finalText), _interim].join('\n');
 
-  void add(String text, {required bool isFinal, int? speaker}) {
+  void add(String text, {required bool isFinal, int? speaker, double? start}) {
     final cleaned = normalizeJapanese(text);
     if (isFinal) {
-      if (cleaned.isNotEmpty) _addFinal(cleaned, speaker);
+      if (cleaned.isNotEmpty) _addFinal(cleaned, speaker, start);
       _interim = '';
       _interimSpeaker = null;
+      _interimStart = null;
     } else {
       _interim = cleaned;
       _interimSpeaker = speaker;
+      _interimStart = start;
     }
   }
 
   /// 録音停止時など、認識中の文も確定扱いにする。
   void flushInterim() {
-    if (_interim.isNotEmpty) _addFinal(_interim, _interimSpeaker);
+    if (_interim.isNotEmpty) {
+      _addFinal(_interim, _interimSpeaker, _interimStart);
+    }
     _interim = '';
     _interimSpeaker = null;
+    _interimStart = null;
   }
 
-  void _addFinal(String text, int? speaker) {
+  void _addFinal(String text, int? speaker, double? start) {
+    _starts.add(start);
     if (speaker != null && speaker != _lastSpeaker) {
       _finals.add('${speakerLabel(speaker)}：$text');
       _lastSpeaker = speaker;

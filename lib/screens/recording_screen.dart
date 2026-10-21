@@ -115,6 +115,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
         event.text,
         isFinal: event.isFinal,
         speaker: event.speaker,
+        start: event.start,
       ),
     );
     if (event.isFinal && _lecture != null) {
@@ -123,6 +124,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
         _lecture!,
         transcript: _buffer.finalText,
         duration: _stopwatch.elapsed,
+        lineStarts: _buffer.starts,
       );
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -172,6 +174,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
         _lecture!,
         transcript: _buffer.finalText,
         duration: _stopwatch.elapsed,
+        lineStarts: _buffer.starts,
       );
     }
     await BackgroundRecording.stop();
