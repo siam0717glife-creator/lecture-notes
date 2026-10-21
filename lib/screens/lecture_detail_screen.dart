@@ -429,7 +429,9 @@ class _PlayerBar extends StatelessWidget {
       color: theme.colorScheme.surfaceContainerHigh,
       child: SafeArea(
         top: false,
-        child: Padding(
+        // 高さを決めないと、つまみ（Slider）が画面いっぱいに広がってしまう。
+        child: Container(
+          height: 64,
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: StreamBuilder<Duration>(
             stream: player.positionStream,
