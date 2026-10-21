@@ -3,8 +3,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../services/background_recording.dart';
 import '../services/deepgram_transcriber.dart';
 import '../services/lecture_store.dart';
 import '../services/settings.dart';
@@ -39,12 +39,15 @@ class _RecordingScreenState extends State<RecordingScreen> {
   Lecture? _lecture;
   StreamSubscription<Uint8List>? _audioSub;
   StreamSubscription<TranscriptEvent>? _eventSub;
+  StreamSubscription<bool>? _connectionSub;
   Timer? _ticker;
   Future<void> _writeChain = Future.value();
 
   bool _starting = true;
   bool _stopping = false;
+  bool _offline = false;
   String? _error;
+  String? _backgroundWarning;
 
   @override
   void initState() {
@@ -72,6 +75,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
         model: widget.settings.model,
       );
       _eventSub = transcriber.events.listen(_onTranscript, onError: _onError);
+      _connectionSub = transcriber.connection.listen(_onConnection);
       await transcriber.connect();
       _transcriber = transcriber;
 
@@ -88,7 +92,12 @@ class _RecordingScreenState extends State<RecordingScreen> {
         _writeChain = _writeChain.then((_) => wav.add(chunk));
       });
 
-      await WakelockPlus.enable();
+      try {
+        await BackgroundRecording.start(widget.title);
+      } catch (_) {
+        // 録音自体は続けられるので、注意だけ出す。
+        _backgroundWarning = '画面を消すと録音が止まることがあります。録音中は画面をつけたままにしてください。';
+      }
       _stopwatch.start();
       _ticker = Timer.periodic(
         const Duration(seconds: 1),
@@ -127,6 +136,15 @@ class _RecordingScreenState extends State<RecordingScreen> {
     });
   }
 
+  void _onConnection(bool connected) {
+    if (!mounted) return;
+    setState(() {
+      // 切れる直前の認識中の文は、もう確定しないので残しておく。
+      if (!connected) _buffer.flushInterim();
+      _offline = !connected;
+    });
+  }
+
   void _onError(Object e) {
     if (!mounted) return;
     setState(() {
@@ -144,6 +162,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
     await _audioSub?.cancel();
     await _transcriber?.finish();
     await _eventSub?.cancel();
+    await _connectionSub?.cancel();
     _buffer.flushInterim();
     await _writeChain;
     await _wav?.close();
@@ -155,8 +174,8 @@ class _RecordingScreenState extends State<RecordingScreen> {
         duration: _stopwatch.elapsed,
       );
     }
-    await WakelockPlus.disable();
-    // 保存した講義を返し、そのまま要約画面に進めるようにする。
+    await BackgroundRecording.stop();
+    // 保存した会議を返し、そのまま要約画面に進めるようにする。
     if (mounted) Navigator.of(context).pop(saved);
   }
 
@@ -165,10 +184,11 @@ class _RecordingScreenState extends State<RecordingScreen> {
     _ticker?.cancel();
     _audioSub?.cancel();
     _eventSub?.cancel();
+    _connectionSub?.cancel();
     _transcriber?.dispose();
     _recorder.dispose();
     _scroll.dispose();
-    WakelockPlus.disable();
+    BackgroundRecording.stop();
     super.dispose();
   }
 
@@ -196,6 +216,20 @@ class _RecordingScreenState extends State<RecordingScreen> {
               recording: !_starting && !_stopping && _error == null,
               elapsed: _formatElapsed(_stopwatch.elapsed),
             ),
+            if (_offline && _error == null)
+              const MaterialBanner(
+                content: Text('通信が切れました。つなぎ直しています…\n録音は続いていて、つながったら続きを文字にします。'),
+                leading: Icon(Icons.wifi_off),
+                actions: [SizedBox.shrink()],
+              ),
+            if (_backgroundWarning != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Text(
+                  _backgroundWarning!,
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ),
             if (_error != null)
               MaterialBanner(
                 content: Text(_error!),

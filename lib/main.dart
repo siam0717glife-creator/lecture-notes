@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'screens/lecture_detail_screen.dart';
 import 'screens/recording_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/background_recording.dart';
 import 'services/lecture_store.dart';
 import 'services/settings.dart';
 
@@ -10,6 +11,7 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
   // 本番版では画面の部品でエラーが起きると灰色の箱になるだけなので、内容を表示する。
   ErrorWidget.builder = (details) => _ErrorView(details.exceptionAsString());
+  BackgroundRecording.init();
   runApp(const LectureNotesApp());
 }
 
@@ -47,7 +49,7 @@ class _LectureNotesAppState extends State<LectureNotesApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '講義録',
+      title: '議事録',
       theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
       darkTheme: ThemeData(
         colorSchemeSeed: Colors.indigo,
@@ -100,7 +102,7 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-/// 保存した講義の一覧と、録音開始ボタンがある最初の画面。
+/// 保存した会議の一覧と、録音開始ボタンがある最初の画面。
 class HomeScreen extends StatefulWidget {
   final AppSettings settings;
   final LectureStore store;
@@ -142,7 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     _reload();
-    // 録音が終わったら、そのまま講義の画面を開く。
+    // 録音が終わったら、そのまま会議の画面を開く。
     if (saved != null && mounted) await _openLecture(saved);
   }
 
@@ -160,12 +162,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
     final controller = TextEditingController(
       text:
-          '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')} の講義',
+          '${now.month}/${now.day} ${now.hour}:${now.minute.toString().padLeft(2, '0')} の会議',
     );
     return showDialog<String>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('講義名'),
+        title: const Text('会議名'),
         content: TextField(controller: controller, autofocus: true),
         actions: [
           TextButton(
@@ -175,7 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
           FilledButton(
             onPressed: () => Navigator.pop(
               c,
-              controller.text.trim().isEmpty ? '無題の講義' : controller.text.trim(),
+              controller.text.trim().isEmpty ? '無題の会議' : controller.text.trim(),
             ),
             child: const Text('録音を始める'),
           ),
@@ -192,7 +194,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('講義録'),
+        title: const Text('議事録'),
         actions: [
           IconButton(
             tooltip: '設定',
@@ -213,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Padding(
                 padding: EdgeInsets.all(32),
                 child: Text(
-                  'まだ講義がありません。\n下のボタンで録音を始めましょう。',
+                  'まだ会議がありません。\n下のボタンで録音を始めましょう。',
                   textAlign: TextAlign.center,
                 ),
               ),

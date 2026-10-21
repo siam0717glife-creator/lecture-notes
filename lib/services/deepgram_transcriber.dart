@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -24,17 +25,32 @@ class DeepgramTranscriber {
   final String language;
   static const sampleRate = 16000;
 
+  /// 切れている間にためておく音声の上限（16kHz・16bit で約5分）。
+  static const maxPendingBytes = sampleRate * 2 * 60 * 5;
+
   IOWebSocketChannel? _channel;
   Completer<void> _closed = Completer<void>();
   final _events = StreamController<TranscriptEvent>.broadcast();
+  final _status = StreamController<bool>.broadcast();
+  final _pending = Queue<Uint8List>();
+  int _pendingBytes = 0;
+  bool _finishing = false;
+  bool _reconnecting = false;
+
+  /// テスト用に接続先を差し替えるとき指定する。
+  final Uri? endpoint;
 
   DeepgramTranscriber({
     required this.apiKey,
     this.model = 'nova-3',
     this.language = 'ja',
+    this.endpoint,
   });
 
   Stream<TranscriptEvent> get events => _events.stream;
+
+  /// つながっているか（false: 切れてつなぎ直し中、true: つながり直した）。
+  Stream<bool> get connection => _status.stream;
 
   static Uri buildUri({required String model, required String language}) {
     return Uri.https('api.deepgram.com', '/v1/listen', {
@@ -79,12 +95,25 @@ class DeepgramTranscriber {
     return counts.entries.reduce((a, b) => b.value > a.value ? b : a).key;
   }
 
+  /// 最初の接続。キーの間違いなどで失敗したら例外になる。
   Future<void> connect() async {
+    _finishing = false;
+    await _open();
+  }
+
+  Future<void> _open() async {
     final channel = IOWebSocketChannel.connect(
-      buildUri(model: model, language: language),
+      endpoint ?? buildUri(model: model, language: language),
       headers: {HttpHeaders.authorizationHeader: 'Token $apiKey'},
+      // 電波が切れたことに早く気づけるよう、定期的に相手の応答を確かめる。
+      pingInterval: const Duration(seconds: 5),
     );
     await channel.ready;
+    if (_finishing && _reconnecting) {
+      // つなぎ直している間に録音が終わった。
+      await channel.sink.close();
+      return;
+    }
     _channel = channel;
     _closed = Completer<void>();
     channel.stream.listen(
@@ -93,23 +122,63 @@ class DeepgramTranscriber {
         final event = parseMessage(message);
         if (event != null) _events.add(event);
       },
-      onError: _events.addError,
+      onError: (_) {
+        // 切断は onDone でまとめて扱う。
+      },
       onDone: () {
         if (!_closed.isCompleted) _closed.complete();
-        final code = channel.closeCode;
-        if (code != null && code != 1000) {
-          _events.addError(
-            '音声認識サーバーとの接続が切れました（コード $code ${channel.closeReason ?? ''}）',
-          );
-        }
+        if (_channel == channel) _channel = null;
+        if (!_finishing) _reconnect();
       },
     );
+    // 切れている間にたまった音声を、つながり直した後にまとめて送る。
+    while (_pending.isNotEmpty && _channel == channel) {
+      channel.sink.add(_pending.removeFirst());
+    }
+    _pendingBytes = 0;
   }
 
-  void sendAudio(Uint8List pcm) => _channel?.sink.add(pcm);
+  /// 通信が切れたら、つながるまで間隔を空けながら何度でもつなぎ直す。
+  Future<void> _reconnect() async {
+    if (_reconnecting) return;
+    _reconnecting = true;
+    _setConnected(false);
+    var wait = const Duration(seconds: 1);
+    while (!_finishing) {
+      await Future.delayed(wait);
+      if (_finishing) break;
+      try {
+        await _open();
+        _setConnected(true);
+        break;
+      } catch (_) {
+        if (wait < const Duration(seconds: 8)) wait *= 2;
+      }
+    }
+    _reconnecting = false;
+  }
+
+  void _setConnected(bool value) {
+    if (!_status.isClosed) _status.add(value);
+  }
+
+  void sendAudio(Uint8List pcm) {
+    final channel = _channel;
+    if (channel != null) {
+      channel.sink.add(pcm);
+      return;
+    }
+    // つながっていない間は音声をためておく（多すぎる分は古い方から捨てる）。
+    _pending.add(pcm);
+    _pendingBytes += pcm.length;
+    while (_pendingBytes > maxPendingBytes && _pending.isNotEmpty) {
+      _pendingBytes -= _pending.removeFirst().length;
+    }
+  }
 
   /// 残りの結果を受け取ってから接続を閉じる。
   Future<void> finish() async {
+    _finishing = true;
     final channel = _channel;
     if (channel == null) return;
     channel.sink.add(jsonEncode({'type': 'CloseStream'}));
@@ -126,5 +195,6 @@ class DeepgramTranscriber {
   Future<void> dispose() async {
     await finish();
     await _events.close();
+    await _status.close();
   }
 }

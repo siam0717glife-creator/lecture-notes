@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:lecture_notes/services/deepgram_transcriber.dart';
 import 'package:lecture_notes/services/lecture_store.dart';
+import 'package:lecture_notes/services/speaker_names.dart';
 import 'package:lecture_notes/services/transcript_buffer.dart';
 import 'package:lecture_notes/services/wav_writer.dart';
 
@@ -127,5 +128,64 @@ void main() {
     await store.delete(list[0]);
     expect((await store.list()).length, 1);
     await dir.delete(recursive: true);
+  });
+
+  group('SpeakerNames', () {
+    const text = '話者1：始めます。\n続けます。\n話者2：質問です。\n話者1：どうぞ。';
+
+    test('出てくる話者を順に見つける', () {
+      expect(SpeakerNames.find(text), ['話者1', '話者2']);
+    });
+
+    test('名前を付けた話者だけ置き換える', () {
+      expect(
+        SpeakerNames.apply(text, {'話者1': '田中'}),
+        '田中：始めます。\n続けます。\n話者2：質問です。\n田中：どうぞ。',
+      );
+    });
+  });
+
+  test('話者の名前を保存して読み込める', () async {
+    final dir = await Directory.systemTemp.createTemp('names');
+    final store = LectureStore(dir);
+    final l = await store.create(title: '定例会');
+    expect(await store.readSpeakerNames(l), isEmpty);
+    await store.saveSpeakerNames(l, {'話者1': '田中'});
+    expect(await store.readSpeakerNames(l), {'話者1': '田中'});
+    await dir.delete(recursive: true);
+  });
+
+  test('通信が切れたらつなぎ直し、切れている間の音声も送る', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final received = <List<int>>[];
+    var connections = 0;
+    server.listen((req) async {
+      final ws = await WebSocketTransformer.upgrade(req);
+      connections++;
+      if (connections == 1) {
+        // 1回目はすぐ切る（電波が途切れたつもり）。
+        await ws.close(1011);
+        return;
+      }
+      ws.listen((m) {
+        if (m is List<int>) received.add(m);
+      });
+    });
+    final t = DeepgramTranscriber(
+      apiKey: 'x',
+      endpoint: Uri.parse('ws://127.0.0.1:${server.port}/'),
+    );
+    final status = <bool>[];
+    t.connection.listen(status.add);
+    await t.connect();
+    await Future.delayed(const Duration(milliseconds: 200));
+    t.sendAudio(Uint8List.fromList([1, 2, 3]));
+    await Future.delayed(const Duration(milliseconds: 1800));
+    expect(status, [false, true]);
+    expect(connections, 2);
+    expect(received, [
+      [1, 2, 3],
+    ]);
+    await server.close(force: true);
   });
 }

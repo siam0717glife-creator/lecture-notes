@@ -4,8 +4,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../services/lecture_note_prompt.dart';
 import '../services/lecture_store.dart';
+import '../services/speaker_names.dart';
 
-/// 保存した講義の要約と文字起こし全文を表示する画面。
+/// 保存した会議の要約と文字起こし全文を表示する画面。
 ///
 /// 要約は無料の Claude アプリで作ってもらい、返ってきた文章を貼り付けて保存する。
 class LectureDetailScreen extends StatefulWidget {
@@ -24,6 +25,10 @@ class LectureDetailScreen extends StatefulWidget {
 class _LectureDetailScreenState extends State<LectureDetailScreen> {
   String? _transcript;
   String? _summary;
+  Map<String, String> _names = {};
+
+  /// 話者の名前を置き換えた文字起こし。
+  String get _namedTranscript => SpeakerNames.apply(_transcript ?? '', _names);
 
   @override
   void initState() {
@@ -34,10 +39,12 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   Future<void> _load() async {
     final transcript = await widget.store.readTranscript(widget.lecture);
     final summary = await widget.store.readSummary(widget.lecture);
+    final names = await widget.store.readSpeakerNames(widget.lecture);
     if (!mounted) return;
     setState(() {
       _transcript = transcript;
       _summary = summary;
+      _names = names;
     });
   }
 
@@ -45,14 +52,14 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   Future<void> _shareToClaudeApp() async {
     final text = LectureNotePrompt.build(
       title: widget.lecture.title,
-      transcript: _transcript ?? '',
+      transcript: _namedTranscript,
     );
     await SharePlus.instance.share(
-      ShareParams(text: text, subject: '${widget.lecture.title} の講義ノート'),
+      ShareParams(text: text, subject: '${widget.lecture.title} の議事録'),
     );
   }
 
-  /// Claude アプリでコピーした要約を、この講義の要約として保存する。
+  /// Claude アプリでコピーした要約を、この会議の要約として保存する。
   Future<void> _pasteSummary() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text?.trim() ?? '';
@@ -72,11 +79,64 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
         .showSnackBar(const SnackBar(content: Text('要約を保存しました')));
   }
 
+  /// 「話者1」などに、参加者の名前を付ける。
+  Future<void> _renameSpeakers() async {
+    final speakers = SpeakerNames.find(_transcript ?? '');
+    final controllers = {
+      for (final s in speakers) s: TextEditingController(text: _names[s] ?? ''),
+    };
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('話者の名前'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final s in speakers)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: TextField(
+                    controller: controllers[s],
+                    decoration: InputDecoration(
+                      labelText: s,
+                      hintText: '例：田中',
+                      border: const OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('やめる'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    final names = {
+      for (final e in controllers.entries)
+        if (e.value.text.trim().isNotEmpty) e.key: e.value.text.trim(),
+    };
+    for (final c in controllers.values) {
+      c.dispose();
+    }
+    if (ok != true) return;
+    await widget.store.saveSpeakerNames(widget.lecture, names);
+    if (mounted) setState(() => _names = names);
+  }
+
   Future<void> _delete() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('この講義を削除しますか？'),
+        title: const Text('この会議を削除しますか？'),
         content: const Text('文字起こし・要約・録音が消えます。元に戻せません。'),
         actions: [
           TextButton(
@@ -188,7 +248,8 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
   }
 
   Widget _buildTranscript() {
-    final text = _transcript ?? '';
+    final text = _namedTranscript;
+    final hasSpeakers = SpeakerNames.find(_transcript ?? '').isNotEmpty;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -208,6 +269,15 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
               ),
           ],
         ),
+        if (hasSpeakers)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.badge_outlined),
+              label: const Text('話者の名前を変える'),
+              onPressed: _renameSpeakers,
+            ),
+          ),
         const SizedBox(height: 8),
         SelectableText(text, style: Theme.of(context).textTheme.bodyLarge),
       ],

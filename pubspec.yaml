@@ -38,8 +38,8 @@ dependencies:
   web_socket_channel: ^3.0.3
   shared_preferences: ^2.5.6
   path_provider: ^2.1.6
-  wakelock_plus: ^1.8.1
   share_plus: ^13.3.1
+  flutter_foreground_task: ^11.0.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

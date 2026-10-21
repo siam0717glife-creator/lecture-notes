@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
-/// 保存した1回分の講義。
+/// 保存した1回分の会議。
 class Lecture {
   final String id;
   final String title;
@@ -23,6 +23,7 @@ class Lecture {
   File get audioFile => File('${dir.path}/audio.wav');
   File get metaFile => File('${dir.path}/meta.json');
   File get summaryFile => File('${dir.path}/summary.txt');
+  File get speakersFile => File('${dir.path}/speakers.json');
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -40,7 +41,7 @@ class Lecture {
   );
 }
 
-/// 講義ごとにフォルダを作り、文字起こし・音声・情報を端末内に保存する。
+/// 会議ごとにフォルダを作り、文字起こし・音声・情報を端末内に保存する。
 class LectureStore {
   final Directory root;
   LectureStore(this.root);
@@ -52,7 +53,7 @@ class LectureStore {
     return LectureStore(root);
   }
 
-  /// 録音を始めるときに、新しい講義のフォルダを作る。
+  /// 録音を始めるときに、新しい会議のフォルダを作る。
   Future<Lecture> create({required String title, DateTime? now}) async {
     final at = now ?? DateTime.now();
     final id = at.millisecondsSinceEpoch.toString();
@@ -86,7 +87,7 @@ class LectureStore {
     return updated;
   }
 
-  /// 保存済みの講義を新しい順に返す。
+  /// 保存済みの会議を新しい順に返す。
   Future<List<Lecture>> list() async {
     final lectures = <Lecture>[];
     await for (final entity in root.list()) {
@@ -117,6 +118,20 @@ class LectureStore {
 
   Future<void> saveSummary(Lecture lecture, String summary) =>
       lecture.summaryFile.writeAsString(summary);
+
+  /// 「話者1 → 田中」のような、話者の名前の対応。
+  Future<Map<String, String>> readSpeakerNames(Lecture lecture) async {
+    if (!await lecture.speakersFile.exists()) return {};
+    try {
+      final json = jsonDecode(await lecture.speakersFile.readAsString());
+      return Map<String, String>.from(json as Map);
+    } on FormatException {
+      return {};
+    }
+  }
+
+  Future<void> saveSpeakerNames(Lecture lecture, Map<String, String> names) =>
+      lecture.speakersFile.writeAsString(jsonEncode(names));
 
   Future<void> delete(Lecture lecture) => lecture.dir.delete(recursive: true);
 }
