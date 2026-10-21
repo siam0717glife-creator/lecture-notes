@@ -1,9 +1,15 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'screens/lecture_detail_screen.dart';
 import 'screens/recording_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/background_recording.dart';
+import 'services/backup.dart';
 import 'services/lecture_store.dart';
 import 'services/settings.dart';
 
@@ -158,6 +164,79 @@ class _HomeScreenState extends State<HomeScreen> {
     _reload();
   }
 
+  /// すべての会議を zip にまとめ、共有メニューから Google ドライブなどに保存する。
+  Future<void> _exportBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final zip = await _withProgress(
+        'バックアップを作っています…',
+        () async => Backup.export(widget.store, await getTemporaryDirectory()),
+      );
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(zip.path, mimeType: 'application/zip')],
+          subject: '議事録のバックアップ',
+          text: '議事録のバックアップです。Google ドライブなどに保存してください。',
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('バックアップできませんでした: $e')));
+    }
+  }
+
+  /// 保存しておいた zip を選び、会議を戻す。
+  Future<void> _restoreBackup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final picked = await FilePicker.pickFile(dialogTitle: 'バックアップのファイルを選ぶ');
+      final path = picked?.path;
+      if (path == null) return;
+      final count = await _withProgress(
+        'バックアップから戻しています…',
+        () async => Backup.restore(
+          widget.store,
+          File(path),
+          await getTemporaryDirectory(),
+        ),
+      );
+      _reload();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            count == 0 ? '新しく戻す会議はありませんでした（すでに全部あります）' : '$count件の会議を戻しました',
+          ),
+        ),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('戻せませんでした: $e')));
+    }
+  }
+
+  /// 時間がかかる作業の間、くるくるを出しておく。
+  Future<T> _withProgress<T>(String message, Future<T> Function() task) async {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 16),
+              Expanded(child: Text(message)),
+            ],
+          ),
+        ),
+      ),
+    );
+    try {
+      return await task();
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
   Future<String?> _askTitle() {
     final now = DateTime.now();
     final controller = TextEditingController(
@@ -200,6 +279,27 @@ class _HomeScreenState extends State<HomeScreen> {
             tooltip: '設定',
             icon: const Icon(Icons.settings),
             onPressed: _openSettings,
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'バックアップ',
+            onSelected: (v) =>
+                v == 'export' ? _exportBackup() : _restoreBackup(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'export',
+                child: ListTile(
+                  leading: Icon(Icons.cloud_upload_outlined),
+                  title: Text('バックアップを作る'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'restore',
+                child: ListTile(
+                  leading: Icon(Icons.cloud_download_outlined),
+                  title: Text('バックアップから戻す'),
+                ),
+              ),
+            ],
           ),
         ],
       ),

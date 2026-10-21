@@ -2,9 +2,11 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lecture_notes/services/backup.dart';
 import 'package:lecture_notes/services/deepgram_transcriber.dart';
 import 'package:lecture_notes/services/lecture_store.dart';
 import 'package:lecture_notes/services/speaker_names.dart';
+import 'package:lecture_notes/services/transcript_edit.dart';
 import 'package:lecture_notes/services/transcript_buffer.dart';
 import 'package:lecture_notes/services/wav_writer.dart';
 
@@ -213,5 +215,50 @@ void main() {
     await store.save(l, transcript: 'a\nb', lineStarts: [0.0, 3.5]);
     expect(await store.readLineStarts(l), [0.0, 3.5]);
     await dir.delete(recursive: true);
+  });
+
+  test('バックアップを書き出し、別の端末で戻せる', () async {
+    final a = await Directory.systemTemp.createTemp('a');
+    final b = await Directory.systemTemp.createTemp('b');
+    final tmp = await Directory.systemTemp.createTemp('t');
+    final from = LectureStore(a);
+    final l = await from.create(title: '定例会', now: DateTime(2026, 10, 1));
+    await from.save(l, transcript: '話者1：はじめます');
+    await from.saveSummary(l, '【会議の概要】テスト');
+    final zip = await Backup.export(
+      from,
+      tmp,
+      now: DateTime(2026, 10, 2, 9, 5),
+    );
+    expect(zip.path, endsWith('gijiroku_backup_20261002_0905.zip'));
+
+    final to = LectureStore(b);
+    expect(await Backup.restore(to, zip, tmp), 1);
+    final list = await to.list();
+    expect(list.single.title, '定例会');
+    expect(await to.readTranscript(list.single), '話者1：はじめます');
+    expect(await to.readSummary(list.single), '【会議の概要】テスト');
+    // 同じものをもう一度戻しても、二重にはならない。
+    expect(await Backup.restore(to, zip, tmp), 0);
+    for (final d in [a, b, tmp]) {
+      await d.delete(recursive: true);
+    }
+  });
+
+  group('TranscriptEdit', () {
+    const text = '話者1：始めまs。\n続けます。\n話者2：質問です。';
+
+    test('話者名を残して本文だけ直す', () {
+      final r = TranscriptEdit.editLine(text, [0, 2, 5], 0, '始めます。');
+      expect(r.transcript, '話者1：始めます。\n続けます。\n話者2：質問です。');
+      expect(r.starts, [0, 2, 5]);
+      expect(TranscriptEdit.body('話者1：始めます。'), '始めます。');
+    });
+
+    test('空にすると行を消し、話者名は次の行に引き継ぐ', () {
+      final r = TranscriptEdit.editLine(text, [0, 2, 5], 0, '');
+      expect(r.transcript, '話者1：続けます。\n話者2：質問です。');
+      expect(r.starts, [2, 5]);
+    });
   });
 }

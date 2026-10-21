@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import '../services/lecture_note_prompt.dart';
 import '../services/lecture_store.dart';
 import '../services/speaker_names.dart';
+import '../services/transcript_edit.dart';
 
 /// 保存した会議の要約と文字起こし全文を表示する画面。
 ///
@@ -100,6 +101,55 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
     setState(() => _summary = text);
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('要約を保存しました')));
+  }
+
+  /// 文字起こしの1行を直す。空にして保存するとその行を消す。
+  Future<void> _editLine(int index) async {
+    final raw = _transcript ?? '';
+    final lines = raw.split('\n');
+    if (index >= lines.length) return;
+    final controller = TextEditingController(
+      text: TranscriptEdit.body(lines[index]),
+    );
+    final result = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('文を直す'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: null,
+          decoration: const InputDecoration(
+            helperText: '空にして保存すると、この文を消します',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('やめる'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result == null) return;
+    final edited = TranscriptEdit.editLine(raw, _lineStarts, index, result);
+    await widget.store.save(
+      widget.lecture,
+      transcript: edited.transcript,
+      lineStarts: edited.starts,
+    );
+    if (mounted) {
+      setState(() {
+        _transcript = edited.transcript;
+        _lineStarts = edited.starts;
+      });
+    }
   }
 
   /// 「話者1」などに、参加者の名前を付ける。
@@ -341,25 +391,27 @@ class _LectureDetailScreenState extends State<LectureDetailScreen> {
                   onPressed: _renameSpeakers,
                 ),
               ),
-            if (canJump)
+            if (lines.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
-                  '文をタップすると、その発言から録音を再生します。',
+                  canJump
+                      ? '文をタップするとその発言から再生、長押しすると文を直せます。'
+                      : '文をタップすると、聞き間違いを直せます。',
                   style: TextStyle(color: theme.colorScheme.outline),
                 ),
               ),
             const SizedBox(height: 8),
-            if (!canJump)
-              SelectableText(text, style: theme.textTheme.bodyLarge)
-            else
-              for (var i = 0; i < lines.length; i++)
-                _TranscriptLine(
-                  text: lines[i],
-                  start: starts[i],
-                  playing: i == current,
-                  onTap: starts[i] == null ? null : () => _playFrom(starts[i]!),
-                ),
+            for (var i = 0; i < lines.length; i++)
+              _TranscriptLine(
+                text: lines[i],
+                start: starts?[i],
+                playing: i == current,
+                onTap: canJump && starts[i] != null
+                    ? () => _playFrom(starts[i]!)
+                    : () => _editLine(i),
+                onLongPress: () => _editLine(i),
+              ),
           ],
         );
       },
@@ -373,11 +425,13 @@ class _TranscriptLine extends StatelessWidget {
   final double? start;
   final bool playing;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   const _TranscriptLine({
     required this.text,
     required this.start,
     required this.playing,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -389,25 +443,27 @@ class _TranscriptLine extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(
-                width: 56,
-                child: Text(
-                  start == null
-                      ? ''
-                      : formatTime(
-                          Duration(milliseconds: (start! * 1000).round()),
-                        ),
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+              if (start != null)
+                SizedBox(
+                  width: 56,
+                  child: Text(
+                    start == null
+                        ? ''
+                        : formatTime(
+                            Duration(milliseconds: (start! * 1000).round()),
+                          ),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
-              ),
               Expanded(child: Text(text, style: theme.textTheme.bodyLarge)),
             ],
           ),
