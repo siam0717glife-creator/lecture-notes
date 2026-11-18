@@ -32,6 +32,11 @@ class BackgroundRecording {
         NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
     }
+    // 電池を長持ちさせる機能に止められないよう、その対象から外す許可を求める。
+    // （「バッテリーの最適化を停止しますか？」と聞かれる）
+    if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+      await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+    }
     if (await FlutterForegroundTask.isRunningService) return;
     final result = await FlutterForegroundTask.startService(
       serviceId: 1001,

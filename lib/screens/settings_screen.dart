@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/settings.dart';
+import 'background_help.dart';
 
 /// 音声認識のAPIキーを入力する画面。
 class SettingsScreen extends StatefulWidget {
@@ -64,6 +65,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 24),
           FilledButton(onPressed: _save, child: const Text('保存')),
+          const SizedBox(height: 24),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.screen_lock_portrait_outlined),
+            title: const Text('画面を消すと録音が止まるとき'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showBackgroundHelp(context),
+          ),
         ],
       ),
     );

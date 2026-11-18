@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 
 import '../services/background_recording.dart';
+import 'background_help.dart';
 import '../services/deepgram_transcriber.dart';
 import '../services/lecture_store.dart';
 import '../services/settings.dart';
@@ -28,7 +29,8 @@ class RecordingScreen extends StatefulWidget {
   State<RecordingScreen> createState() => _RecordingScreenState();
 }
 
-class _RecordingScreenState extends State<RecordingScreen> {
+class _RecordingScreenState extends State<RecordingScreen>
+    with WidgetsBindingObserver {
   final _recorder = AudioRecorder();
   final _buffer = TranscriptBuffer();
   final _scroll = ScrollController();
@@ -49,9 +51,17 @@ class _RecordingScreenState extends State<RecordingScreen> {
   String? _error;
   String? _backgroundWarning;
 
+  /// 受け取った音声の合計（バイト）。経過時間と比べて、止まっていないか確かめる。
+  int _audioBytes = 0;
+
+  /// 録音が止まっていた合計の秒数（画面を消している間など）。
+  int _lostSeconds = 0;
+  double? _baseGap;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _start();
   }
 
@@ -88,6 +98,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
         ),
       );
       _audioSub = audio.listen((chunk) {
+        _audioBytes += chunk.length;
         transcriber.sendAudio(chunk);
         _writeChain = _writeChain.then((_) => wav.add(chunk));
       });
@@ -99,10 +110,14 @@ class _RecordingScreenState extends State<RecordingScreen> {
         _backgroundWarning = '画面を消すと録音が止まることがあります。録音中は画面をつけたままにしてください。';
       }
       _stopwatch.start();
-      _ticker = Timer.periodic(
-        const Duration(seconds: 1),
-        (_) => setState(() {}),
-      );
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        // 画面がついている間に、録音開始時のわずかなずれを基準として覚える。
+        _baseGap ??=
+            _stopwatch.elapsedMilliseconds / 1000 -
+            _audioBytes / (DeepgramTranscriber.sampleRate * 2);
+        _checkAudioGap();
+        setState(() {});
+      });
       setState(() => _starting = false);
     } catch (e) {
       _onError(e);
@@ -136,6 +151,23 @@ class _RecordingScreenState extends State<RecordingScreen> {
         );
       }
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkAudioGap();
+  }
+
+  /// 経過時間に対して音声が足りなければ、その間は録音が止まっていた。
+  void _checkAudioGap() {
+    if (!_stopwatch.isRunning || _stopping) return;
+    final audioSeconds = _audioBytes / (DeepgramTranscriber.sampleRate * 2);
+    final gap = _stopwatch.elapsedMilliseconds / 1000 - audioSeconds;
+    _baseGap ??= gap;
+    final lost = (gap - _baseGap!).round();
+    if (lost >= 5 && lost > _lostSeconds && mounted) {
+      setState(() => _lostSeconds = lost);
+    }
   }
 
   void _onConnection(bool connected) {
@@ -184,6 +216,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _audioSub?.cancel();
     _eventSub?.cancel();
@@ -224,6 +257,20 @@ class _RecordingScreenState extends State<RecordingScreen> {
                 content: Text('通信が切れました。つなぎ直しています…\n録音は続いていて、つながったら続きを文字にします。'),
                 leading: Icon(Icons.wifi_off),
                 actions: [SizedBox.shrink()],
+              ),
+            if (_lostSeconds > 0)
+              MaterialBanner(
+                content: Text(
+                  '画面を消している間、約$_lostSeconds秒録音が止まっていました。'
+                  'スマホの設定で止まらないようにできます。',
+                ),
+                leading: const Icon(Icons.warning_amber),
+                actions: [
+                  TextButton(
+                    onPressed: () => showBackgroundHelp(context),
+                    child: const Text('設定のしかた'),
+                  ),
+                ],
               ),
             if (_backgroundWarning != null)
               Padding(
